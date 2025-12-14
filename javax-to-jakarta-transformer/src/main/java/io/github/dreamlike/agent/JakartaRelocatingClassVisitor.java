@@ -13,24 +13,36 @@ import org.objectweb.asm.*;
 import org.objectweb.asm.signature.SignatureReader;
 import org.objectweb.asm.signature.SignatureWriter;
 
-import java.util.HashMap;
-import java.util.HashSet;
-import java.util.Map;
+import java.util.*;
 
+/**
+ * 1. 注解转换
+ * 注解转换后会只保留一个 当javax被转换为jakarta后 如果其同时存在两种注解 那么只会保留顺序第一个的
+ * 对于javac来讲 同一种注解即使打了repeatable也最终只有一个保存
+ * repeatable是一个特殊的语法糖会将其收集为一个注解
+ * 2 attribute转换
+ * 本实现只处理java源码编译的产物 不对kotlin/scala等产物进行处理 所以不处理attribute的内容
+ */
 class JakartaRelocatingClassVisitor extends ClassVisitor {
     private static final Map<String, String> binaryMappings = Map.of("javax/servlet", "jakarta/servlet", "javax/validation", "jakarta/validation");
+    private static final List<String> binaryPrefixes = List.copyOf(binaryMappings.keySet());
     private static final Map<String, String> classMappings = Map.of("javax.servlet", "jakarta.servlet", "javax.validation", "jakarta.validation");
 
-    private final HashSet<String> classHandleProcessed = new HashSet<String>();
+    private final HashSet<String> classHandleAnnotationHandleProcessed = new HashSet<String>();
+    private final HashSet<String> classHandleTypeAnnotationHandleProcessed = new HashSet<String>();
     boolean needTransform;
 
     public JakartaRelocatingClassVisitor(ClassWriter classWriter) {
         super(Opcodes.ASM9, classWriter);
     }
 
-    @Override
-    public void visitEnd() {
-        super.visitEnd();
+    public static boolean isBinaryPrefix(String s) {
+        for (String binaryPrefix : binaryPrefixes) {
+            if (s.startsWith(binaryPrefix)) {
+                return true;
+            }
+        }
+        return false;
     }
 
     private String relocateBinary(String s) {
@@ -103,6 +115,7 @@ class JakartaRelocatingClassVisitor extends ClassVisitor {
 
     @Override
     public void visit(int version, int access, String name, String signature, String superName, String[] interfaces) {
+        //signature一定要改！必须跟interface保持一致
         super.visit(version, access, name, relocateSignature(signature, false), relocateBinary(superName), renameArray(interfaces));
     }
 
@@ -120,10 +133,26 @@ class JakartaRelocatingClassVisitor extends ClassVisitor {
     @Override
     public AnnotationVisitor visitAnnotation(String descriptor, boolean visible) {
         String afterProcess = relocateBinary(descriptor);
-        if (classHandleProcessed.add(afterProcess)) {
-            return super.visitAnnotation(afterProcess, visible);
+        if (classHandleAnnotationHandleProcessed.add(afterProcess)) {
+            return new RelocatingAnnotationVisitor(api, super.visitAnnotation(afterProcess, visible));
         }
         return null;
+    }
+
+    @Override
+    public AnnotationVisitor visitTypeAnnotation(int typeRef, TypePath typePath, String descriptor, boolean visible) {
+        String afterProcess = relocateBinary(descriptor);
+        if (classHandleTypeAnnotationHandleProcessed.add(afterProcess)) {
+            return new RelocatingAnnotationVisitor(api, super.visitTypeAnnotation(typeRef, typePath, afterProcess, visible));
+        }
+        return null;
+    }
+
+    @Override
+    public RecordComponentVisitor visitRecordComponent(String name, String descriptor, String signature) {
+        String rawType = relocateBinary(descriptor);
+        String rawSignature = relocateSignature(signature, false);
+        return new RelocatingRecordComponentVisitor(api, super.visitRecordComponent(name, rawType, rawSignature));
     }
 
     private class RelocatingFieldVisitor extends FieldVisitor {
@@ -153,7 +182,6 @@ class JakartaRelocatingClassVisitor extends ClassVisitor {
             }
             return null;
         }
-
     }
 
     private class RelocatingAnnotationVisitor extends AnnotationVisitor {
@@ -163,6 +191,15 @@ class JakartaRelocatingClassVisitor extends ClassVisitor {
 
         @Override
         public void visit(String name, Object value) {
+            if (value instanceof Type asmType) {
+                super.visit(name,  Type.getType(relocateBinary(asmType.getDescriptor())));
+                return;
+            }
+
+            if (value instanceof String literal) {
+                super.visit(name, relocateClassName(literal));
+                return;
+            }
             super.visit(name, value);
         }
 
@@ -187,7 +224,8 @@ class JakartaRelocatingClassVisitor extends ClassVisitor {
     }
 
     private class RelocatingMethodVisitor extends MethodVisitor {
-        private final HashSet<String> methodHandleProcessed = new HashSet<String>();
+        private final HashSet<String> methodHandleAnnotationProcessed = new HashSet<String>();
+        private final HashSet<String> methodTypeAnnotationHandleProcessed = new HashSet<String>();
         private final HashMap<Integer, HashSet<String>> parameterAnnotationHandleProcessed = new HashMap<>();
 
         public RelocatingMethodVisitor(MethodVisitor mv) {
@@ -197,8 +235,8 @@ class JakartaRelocatingClassVisitor extends ClassVisitor {
         @Override
         public AnnotationVisitor visitAnnotation(String descriptor, boolean visible) {
             String afterProcess = relocateBinary(descriptor);
-            if (methodHandleProcessed.add(afterProcess)) {
-                return super.visitAnnotation(afterProcess, visible);
+            if (methodHandleAnnotationProcessed.add(afterProcess)) {
+                return new RelocatingAnnotationVisitor(api, super.visitAnnotation(afterProcess, visible));
             }
             return null;
         }
@@ -223,14 +261,20 @@ class JakartaRelocatingClassVisitor extends ClassVisitor {
             HashSet<String> currentParameterHandleProcessed = parameterAnnotationHandleProcessed.computeIfAbsent(parameter, k -> new HashSet<>());
             String afterProcess = relocateBinary(descriptor);
             if (currentParameterHandleProcessed.add(afterProcess)) {
-                return super.visitParameterAnnotation(parameter, afterProcess, visible);
+                AnnotationVisitor proxy = super.visitParameterAnnotation(parameter, afterProcess, visible);
+                return new RelocatingAnnotationVisitor(api, proxy);
             }
             return null;
         }
 
         @Override
         public AnnotationVisitor visitTypeAnnotation(int typeRef, TypePath typePath, String descriptor, boolean visible) {
-            return super.visitTypeAnnotation(typeRef, typePath, descriptor, visible);
+            String afterProcess = relocateBinary(descriptor);
+            if (methodTypeAnnotationHandleProcessed.add(afterProcess)) {
+                AnnotationVisitor proxy = super.visitTypeAnnotation(typeRef, typePath, afterProcess, visible);
+                return new RelocatingAnnotationVisitor(api, proxy);
+            }
+            return null;
         }
 
         @Override
@@ -274,7 +318,7 @@ class JakartaRelocatingClassVisitor extends ClassVisitor {
         @Override
         public void visitLocalVariable(String name, String desc, String signature, Label start,
                                        Label end, int index) {
-            super.visitLocalVariable(name, relocateBinary(desc), relocateBinary(signature), start, end, index);
+            super.visitLocalVariable(name, relocateBinary(desc), relocateSignature(signature, true), start, end, index);
         }
 
         @Override
@@ -300,6 +344,32 @@ class JakartaRelocatingClassVisitor extends ClassVisitor {
         private Handle relocateHandle(Handle handle) {
             return new Handle(handle.getTag(), relocateBinary(handle.getOwner()), handle.getName(), relocateBinary(handle.getDesc()),
                     handle.isInterface());
+        }
+    }
+
+    private class RelocatingRecordComponentVisitor extends RecordComponentVisitor {
+        private final HashSet<String> recordComponentAnnotationProcessed = new HashSet<>();
+        private final HashSet<String> recordComponentTypeAnnotationProcessed = new HashSet<>();
+        protected RelocatingRecordComponentVisitor(int api, RecordComponentVisitor recordComponentVisitor) {
+            super(api, recordComponentVisitor);
+        }
+
+        @Override
+        public AnnotationVisitor visitAnnotation(String descriptor, boolean visible) {
+            String afterProcess = relocateBinary(descriptor);
+            if (recordComponentAnnotationProcessed.add(afterProcess)) {
+                return new RelocatingAnnotationVisitor(api, super.visitAnnotation(afterProcess, visible));
+            }
+            return null;
+        }
+
+        @Override
+        public AnnotationVisitor visitTypeAnnotation(int typeRef, TypePath typePath, String descriptor, boolean visible) {
+            String afterProcess = relocateBinary(descriptor);
+            if (recordComponentTypeAnnotationProcessed.add(afterProcess)) {
+                return new RelocatingAnnotationVisitor(api, super.visitTypeAnnotation(typeRef, typePath, afterProcess, visible));
+            }
+            return null;
         }
     }
 }

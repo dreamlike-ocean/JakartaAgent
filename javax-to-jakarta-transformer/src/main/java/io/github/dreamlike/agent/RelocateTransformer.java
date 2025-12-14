@@ -20,12 +20,11 @@ import java.security.ProtectionDomain;
 
 class RelocateTransformer implements ClassFileTransformer {
     @Override
-    public byte[] transform(ClassLoader loader, String className, Class<?> classBeingRedefined, ProtectionDomain protectionDomain, byte[] classfileBuffer) {
-        if (protectionDomain == null || protectionDomain.getCodeSource() == null) {
-            return classfileBuffer;
+    public byte[] transform(ClassLoader loader, String className, Class<?> classBeingRedefined, ProtectionDomain protectionDomain, byte[] classFileBuffer) {
+        if (protectionDomain == null || protectionDomain.getCodeSource() == null || JakartaRelocatingClassVisitor.isBinaryPrefix(className)) {
+            return classFileBuffer;
         }
-        String jarPath = protectionDomain.getCodeSource().getLocation().toString();
-        ClassReader classReader = new ClassReader(classfileBuffer);
+        ClassReader classReader = new ClassReader(classFileBuffer);
         ClassWriter classWriter = new ClassWriter(classReader, ClassWriter.COMPUTE_FRAMES | ClassWriter.COMPUTE_MAXS);
         // relocatingClassVisitor重定向后交给classWriter写出
         JakartaRelocatingClassVisitor relocatingClassVisitor = new JakartaRelocatingClassVisitor(classWriter);
@@ -35,7 +34,7 @@ class RelocateTransformer implements ClassFileTransformer {
             //todo 条件dump
             dump(className, classWriter.toByteArray());
         }
-        return relocatingClassVisitor.needTransform ? classWriter.toByteArray() : classfileBuffer;
+        return relocatingClassVisitor.needTransform ? classWriter.toByteArray() : classFileBuffer;
     }
 
     static void dump(String className, byte[] classfileBuffer) {
