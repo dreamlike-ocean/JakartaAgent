@@ -19,19 +19,24 @@ import java.nio.file.Paths;
 import java.security.ProtectionDomain;
 
 class RelocateTransformer implements ClassFileTransformer {
+    private static final String DUMP_PATH = System.getProperty("jakarta.dump.path");
     @Override
     public byte[] transform(ClassLoader loader, String className, Class<?> classBeingRedefined, ProtectionDomain protectionDomain, byte[] classFileBuffer) {
         if (protectionDomain == null || protectionDomain.getCodeSource() == null || JakartaRelocatingClassVisitor.isBinaryPrefix(className)) {
             return classFileBuffer;
         }
         ClassReader classReader = new ClassReader(classFileBuffer);
-        ClassWriter classWriter = new ClassWriter(classReader, ClassWriter.COMPUTE_FRAMES | ClassWriter.COMPUTE_MAXS);
+        ClassWriter classWriter = new ClassWriter(classReader, ClassWriter.COMPUTE_FRAMES | ClassWriter.COMPUTE_MAXS) {
+            @Override
+            protected String getCommonSuperClass(String type1, String type2) {
+                return "java/lang/Object";
+            }
+        };
         // relocatingClassVisitor重定向后交给classWriter写出
         JakartaRelocatingClassVisitor relocatingClassVisitor = new JakartaRelocatingClassVisitor(classWriter);
 
         classReader.accept(relocatingClassVisitor, ClassReader.EXPAND_FRAMES);
-        if (relocatingClassVisitor.needTransform) {
-            //todo 条件dump
+        if (relocatingClassVisitor.needTransform && DUMP_PATH != null) {
             dump(className, classWriter.toByteArray());
         }
         return relocatingClassVisitor.needTransform ? classWriter.toByteArray() : classFileBuffer;
@@ -39,7 +44,7 @@ class RelocateTransformer implements ClassFileTransformer {
 
     static void dump(String className, byte[] classfileBuffer) {
         try {
-            Path path = Paths.get("jakarta-transformed/" + className.replace('.', '/') + ".class");
+            Path path = Paths.get(DUMP_PATH + "/" + className.replace('.', '/') + ".class");
             Files.createDirectories(path.getParent());
             Files.write(path, classfileBuffer);
         } catch (Exception e) {

@@ -12,6 +12,8 @@ import jakarta.validation.constraints.NotBlank;
 
 import jakarta.validation.ConstraintTarget;
 
+import javax.tools.JavaCompiler;
+import javax.tools.ToolProvider;
 import javax.validation.constraints.NotEmpty;
 import java.lang.annotation.Annotation;
 import java.lang.reflect.*;
@@ -106,5 +108,11 @@ public class ReplaceTest {
         Assert.assertNotNull(annotation);
         annotation = field.getAnnotatedType().getAnnotation(NotBlank.class);
         Assert.assertNotNull(annotation);
+    }
+
+    @Test
+    public void testJDKClass() {
+        // 不会抛出java.lang.LinkageError: loader 'app' attempted duplicate abstract class definition for com.sun.source.util.JavacTask.
+        JavaCompiler systemJavaCompiler = ToolProvider.getSystemJavaCompiler();
     }
 }
