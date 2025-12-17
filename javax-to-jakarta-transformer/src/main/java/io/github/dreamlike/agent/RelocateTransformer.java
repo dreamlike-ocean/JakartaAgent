@@ -17,21 +17,27 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.security.ProtectionDomain;
+import java.util.concurrent.ConcurrentHashMap;
 
 class RelocateTransformer implements ClassFileTransformer {
-    private static final String DUMP_PATH = System.getProperty("jakarta.dump.path");
+    private final String DUMP_PATH;
+    private final boolean fast;
+    final ConcurrentHashMap<String, ClassMeta> classMetaMap;
+
+    RelocateTransformer(JakartaAgent.JakartaAgentArgs args) {
+        DUMP_PATH = args.dumpPath();
+        this.fast = args.fast();
+        classMetaMap = new ConcurrentHashMap<>();
+    }
+
     @Override
     public byte[] transform(ClassLoader loader, String className, Class<?> classBeingRedefined, ProtectionDomain protectionDomain, byte[] classFileBuffer) {
         if (protectionDomain == null || protectionDomain.getCodeSource() == null || JakartaRelocatingClassVisitor.isBinaryPrefix(className)) {
             return classFileBuffer;
         }
         ClassReader classReader = new ClassReader(classFileBuffer);
-        ClassWriter classWriter = new ClassWriter(classReader, ClassWriter.COMPUTE_FRAMES | ClassWriter.COMPUTE_MAXS) {
-            @Override
-            protected String getCommonSuperClass(String type1, String type2) {
-                return "java/lang/Object";
-            }
-        };
+        int flags = ClassWriter.COMPUTE_FRAMES | ClassWriter.COMPUTE_MAXS;
+        ClassWriter classWriter = fast ? new UnSafeClassWriter(classReader, flags) : new SafeClassWriter(this, loader, classReader, flags);
         // relocatingClassVisitor重定向后交给classWriter写出
         JakartaRelocatingClassVisitor relocatingClassVisitor = new JakartaRelocatingClassVisitor(classWriter);
 
@@ -42,7 +48,7 @@ class RelocateTransformer implements ClassFileTransformer {
         return relocatingClassVisitor.needTransform ? classWriter.toByteArray() : classFileBuffer;
     }
 
-    static void dump(String className, byte[] classfileBuffer) {
+    void dump(String className, byte[] classfileBuffer) {
         try {
             Path path = Paths.get(DUMP_PATH + "/" + className.replace('.', '/') + ".class");
             Files.createDirectories(path.getParent());
@@ -50,5 +56,8 @@ class RelocateTransformer implements ClassFileTransformer {
         } catch (Exception e) {
             e.printStackTrace();
         }
+    }
+
+    record ClassMeta(String className, String superName, String[] interfaces, boolean isInterface) {
     }
 }

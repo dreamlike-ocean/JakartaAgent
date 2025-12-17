@@ -41,7 +41,7 @@
                 <version>3.5.4</version>
                 <configuration>
                     <argLine>
-                        -javaagent:${project.basedir}/../javax-to-jakarta-transformer/target/javax-to-jakarta-transformer-${project.version}.jar
+                        -javaagent:${project.basedir}/../javax-to-jakarta-transformer/target/javax-to-jakarta-transformer-${project.version}.jar=jakarta.compute.frames.fast=false
                     </argLine>
                 </configuration>
             </plugin>
