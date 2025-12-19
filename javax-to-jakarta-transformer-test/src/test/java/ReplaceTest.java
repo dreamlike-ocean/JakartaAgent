@@ -112,7 +112,6 @@ public class ReplaceTest {
 
     @Test
     public void testJDKClass() {
-        // 不会抛出java.lang.LinkageError: loader 'app' attempted duplicate abstract class definition for com.sun.source.util.JavacTask.
-        JavaCompiler systemJavaCompiler = ToolProvider.getSystemJavaCompiler();
+        new SelfReferenceClass();
     }
 }

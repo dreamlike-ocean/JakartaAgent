@@ -11,6 +11,7 @@ class UnSafeClassWriter extends ClassWriter {
 
     @Override
     protected String getCommonSuperClass(String type1, String type2) {
-        return "java/lang/Object";
+//        return "java/lang/Object";
+        return super.getCommonSuperClass(type1, type2);
     }
 }
