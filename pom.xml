@@ -15,6 +15,7 @@
     <modules>
         <module>javax-to-jakarta-transformer</module>
         <module>javax-to-jakarta-transformer-test</module>
+        <module>javax-servlet-scanner</module>
     </modules>
 
     <dependencyManagement>
