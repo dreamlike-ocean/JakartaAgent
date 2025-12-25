@@ -1,19 +1,18 @@
 package io.github.dreamlike.scanner;
 
+import java.awt.*;
 import java.io.ByteArrayInputStream;
 import java.io.File;
 import java.io.IOException;
 import java.lang.classfile.*;
-import java.lang.classfile.attribute.ExceptionsAttribute;
-import java.lang.classfile.attribute.RuntimeVisibleAnnotationsAttribute;
-import java.lang.classfile.attribute.RuntimeVisibleTypeAnnotationsAttribute;
-import java.lang.classfile.attribute.SignatureAttribute;
+import java.lang.classfile.attribute.*;
 import java.lang.classfile.constantpool.*;
 import java.lang.classfile.instruction.*;
 import java.lang.constant.*;
 import java.nio.file.Files;
 import java.util.*;
 import java.util.function.Function;
+import java.util.function.Predicate;
 import java.util.stream.Stream;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipInputStream;
@@ -25,6 +24,8 @@ public class ServletScanner {
     private static final String EXTEND_SERVLET_INTERFACE = "Current Class implements javax.servlet interface";
     private static final String CLASS_HAVE_SERVLET_GENERIC = "Current Class implements javax.servlet generic";
     private static final String CLASS_HAVE_SERVLET_ANNOTATION = "Current Class has javax.servlet annotation";
+
+    private static final String RECORD_HAVE_SERVLET_COMPONENT = "Current record has javax.servlet component";
 
     private static final String METHOD_HAVE_SERVLET_GENERIC = "Current Method has javax.servlet generic";
     private static final String METHOD_HAVE_SERVLET_ANNOTATION = "Current Method has javax.servlet annotation";
@@ -175,8 +176,30 @@ public class ServletScanner {
 
         // 注解
         Stream<ScannedClass> annotationStream = parseAnnotation(jarName, thisClass, Location.Class, CLASS_HAVE_SERVLET_ANNOTATION, classElement);
-        return Stream.of(genericStream, superClassStream, interfaceStream, annotationStream)
+
+        //record
+        Stream<ScannedClass> recordStream = classElement.attributes()
+                .stream()
+                .filter(a -> a instanceof RecordAttribute)
+                .flatMap(a -> ((RecordAttribute) a).components().stream())
+                .filter(ServletScanner::parseRecordComponent)
+                .map(r -> new ScannedClass(jarName, thisClass, Location.Class, RECORD_HAVE_SERVLET_COMPONENT));
+        return Stream.of(genericStream, superClassStream, interfaceStream, annotationStream, recordStream)
                 .flatMap(Function.identity());
+    }
+
+    private static boolean parseRecordComponent(RecordComponentInfo recordComponentInfo) {
+        Predicate<RecordComponentInfo> rawTypePredicate = (info) -> shouldRecord(info.descriptor().stringValue());
+        Predicate<RecordComponentInfo> signaturePredicate = (info) -> info.findAttribute(Attributes.signature())
+                .map(SignatureAttribute::asTypeSignature)
+                .map(Signature::signatureString)
+                .filter(ServletScanner::shouldRecord)
+                .isPresent();
+        Predicate<RecordComponentInfo> annotationPredicate = (info) -> filterAnnotation(info).findAny().isPresent();
+        return rawTypePredicate
+                .or(signaturePredicate)
+                .or(annotationPredicate)
+                .test(recordComponentInfo);
     }
 
     private static Stream<ScannedClass> parseMethod(String jarName, ClassModel classElement) {
@@ -350,6 +373,11 @@ public class ServletScanner {
 
 
     private static Stream<ScannedClass> parseAnnotation(String jarName, String thisClassName, Location location, String detail, AttributedElement attributedElement) {
+        return filterAnnotation(attributedElement)
+                .map(a -> new ScannedClass(jarName, thisClassName, location, detail));
+    }
+
+    private static Stream<Annotation> filterAnnotation(AttributedElement attributedElement) {
         return attributedElement.attributes()
                 .stream()
                 .filter(a -> a instanceof RuntimeVisibleAnnotationsAttribute || a instanceof RuntimeVisibleTypeAnnotationsAttribute)
@@ -361,8 +389,7 @@ public class ServletScanner {
                         return runtimeVisibleTypeAnnotationsAttribute.annotations().stream().map(TypeAnnotation::annotation);
                     }
                 })
-                .filter(a -> shouldRecord(a.className().stringValue()))
-                .map(a -> new ScannedClass(jarName, thisClassName, location, detail));
+                .filter(a -> shouldRecord(a.className().stringValue()));
     }
 
     private record JarChunk(byte[] classBytes, String jarName) {
