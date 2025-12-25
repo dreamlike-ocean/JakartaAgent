@@ -14,7 +14,6 @@ import java.lang.constant.*;
 import java.nio.file.Files;
 import java.util.*;
 import java.util.function.Function;
-import java.util.stream.Collectors;
 import java.util.stream.Stream;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipInputStream;
@@ -36,6 +35,10 @@ public class ServletScanner {
     private static final String FIELD_HAVE_SERVLET_GENERIC = "Current Field has javax.servlet generic";
     private static final String FIELD_HAVE_SERVLET_ANNOTATION = "Current Field has javax.servlet annotation";
     private static final String FIELD_HAVE_SERVLET_TYPE = "Current Field has javax.servlet type";
+
+    private static boolean shouldRecord(String name) {
+        return name != null && (name.contains(TARGET_PACKAGE) || name.contains(TARGET_NAME));
+    }
 
     public static void main(String[] args) throws IOException {
         if (args.length < 1) {
@@ -133,7 +136,7 @@ public class ServletScanner {
 
     private static Stream<ScannedClass> parseField0(String jarName, String thisClassName, FieldModel fieldModel) {
         Stream<ScannedClass> typeStream;
-        if (fieldModel.fieldTypeSymbol().descriptorString().contains(TARGET_NAME)) {
+        if (shouldRecord(fieldModel.fieldTypeSymbol().descriptorString())) {
             typeStream = Stream.of(new ScannedClass(jarName, thisClassName, Location.Field, FIELD_HAVE_SERVLET_TYPE));
         } else {
             typeStream = Stream.empty();
@@ -142,7 +145,7 @@ public class ServletScanner {
                 .stream()
                 .filter(a -> a instanceof SignatureAttribute)
                 .map(a -> (SignatureAttribute) a)
-                .filter(a -> a.asTypeSignature().signatureString().contains(TARGET_PACKAGE))
+                .filter(a -> shouldRecord(a.asTypeSignature().signatureString()))
                 .map(a -> new ScannedClass(jarName, thisClassName, Location.Field, FIELD_HAVE_SERVLET_GENERIC));
         Stream<ScannedClass> annotation = parseAnnotation(jarName, thisClassName, Location.Field, FIELD_HAVE_SERVLET_ANNOTATION, fieldModel);
         return Stream.of(typeStream, genericStream, annotation)
@@ -156,18 +159,18 @@ public class ServletScanner {
                 .stream()
                 .filter(a -> a instanceof SignatureAttribute)
                 .map(a -> (SignatureAttribute) a)
-                .filter(a -> a.asClassSignature().signatureString().contains(TARGET_PACKAGE))
+                .filter(a -> shouldRecord(a.asClassSignature().signatureString()))
                 .map(a -> new ScannedClass(jarName, thisClass, Location.Class, CLASS_HAVE_SERVLET_GENERIC));
         // 继承
         Stream<ScannedClass> superClassStream = classElement.superclass()
                 .map(ClassEntry::asInternalName)
-                .filter(name -> name.contains(TARGET_PACKAGE))
+                .filter(ServletScanner::shouldRecord)
                 .map(_ -> new ScannedClass(jarName, thisClass, Location.Class, EXTEND_SERVLET_CLASS))
                 .stream();
         //接口
         Stream<ScannedClass> interfaceStream = classElement.interfaces().stream()
                 .map(ClassEntry::asInternalName)
-                .filter(name -> name.contains(TARGET_PACKAGE))
+                .filter(ServletScanner::shouldRecord)
                 .map(_ -> new ScannedClass(jarName, thisClass, Location.Class, EXTEND_SERVLET_INTERFACE));
 
         // 注解
@@ -189,7 +192,7 @@ public class ServletScanner {
                 .stream()
                 .filter(a -> a instanceof SignatureAttribute)
                 .map(a -> (SignatureAttribute) a)
-                .filter(a -> a.asMethodSignature().signatureString().contains(TARGET_PACKAGE))
+                .filter(a -> shouldRecord(a.asMethodSignature().signatureString()))
                 .map(a -> new ScannedClass(jarName, thisClassName, Location.Method, METHOD_HAVE_SERVLET_GENERIC));
         //异常
         Stream<ScannedClass> execptionDeclareStream = methodModel.attributes()
@@ -198,7 +201,7 @@ public class ServletScanner {
                 .map(a -> (ExceptionsAttribute) a)
                 .flatMap(a -> a.exceptions().stream())
                 .map(ClassEntry::asInternalName)
-                .filter(name -> name.contains(TARGET_PACKAGE))
+                .filter(ServletScanner::shouldRecord)
                 .map(_ -> new ScannedClass(jarName, thisClassName, Location.Method, METHOD_HAVE_SERVLET_EXCEPTION));
         //注解
         Stream<ScannedClass> annotationStream = parseAnnotation(jarName, thisClassName, Location.Method, METHOD_HAVE_SERVLET_ANNOTATION, methodModel);
@@ -207,7 +210,7 @@ public class ServletScanner {
         Stream<ScannedClass> parameterListStream = methodModel.methodTypeSymbol().parameterList()
                 .stream()
                 .map(ClassDesc::descriptorString)
-                .filter(name -> name.contains(TARGET_PACKAGE))
+                .filter(ServletScanner::shouldRecord)
                 .map(_ -> new ScannedClass(jarName, thisClassName, Location.Method, METHOD_HAVE_SERVLET_PARAMETER));
         // 方法体
         Stream<ScannedClass> bodyStream = methodModel.code()
@@ -228,20 +231,20 @@ public class ServletScanner {
         for (CodeElement codeElement : codeModel.elementList()) {
             var res = switch (codeElement) {
                 case ExceptionCatch exceptionCatch ->
-                        exceptionCatch.catchType().map(ClassEntry::asInternalName).filter(name -> name.contains(TARGET_PACKAGE)).map(_ -> new ScannedClass(jarName, thisClassName, Location.Method, METHOD_HAVE_SERVLET_BODY));
+                        exceptionCatch.catchType().map(ClassEntry::asInternalName).filter(name -> shouldRecord(name)).map(_ -> new ScannedClass(jarName, thisClassName, Location.Method, METHOD_HAVE_SERVLET_BODY));
                 case ConstantInstruction.LoadConstantInstruction loadInstruction when checkConstantInstruction(loadInstruction.constantEntry()) ->
                         Optional.of(new ScannedClass(jarName, thisClassName, Location.Method, METHOD_HAVE_SERVLET_BODY));
                 case InvokeDynamicInstruction invokeDynamicInstruction when checkInvokeDynamicInstruction(invokeDynamicInstruction) ->
                         Optional.of(new ScannedClass(jarName, thisClassName, Location.Method, METHOD_HAVE_SERVLET_BODY));
                 case InvokeInstruction instruction when checkInvokeInstruction(instruction) ->
                         Optional.of(new ScannedClass(jarName, thisClassName, Location.Method, METHOD_HAVE_SERVLET_BODY));
-                case FieldInstruction fieldInstruction when fieldInstruction.field().typeSymbol().descriptorString().contains(TARGET_PACKAGE) ->
+                case FieldInstruction fieldInstruction when shouldRecord(fieldInstruction.field().typeSymbol().descriptorString()) ->
                         Optional.of(new ScannedClass(jarName, thisClassName, Location.Method, METHOD_HAVE_SERVLET_BODY));
-                case NewObjectInstruction newObjectInstruction when newObjectInstruction.className().asInternalName().contains(TARGET_PACKAGE) ->
+                case NewObjectInstruction newObjectInstruction when shouldRecord(newObjectInstruction.className().asInternalName()) ->
                         Optional.of(new ScannedClass(jarName, thisClassName, Location.Method, METHOD_HAVE_SERVLET_BODY));
-                case NewReferenceArrayInstruction newReferenceArrayInstruction when newReferenceArrayInstruction.componentType().asInternalName().contains(TARGET_PACKAGE) ->
+                case NewReferenceArrayInstruction newReferenceArrayInstruction when shouldRecord(newReferenceArrayInstruction.componentType().asInternalName()) ->
                         Optional.of(new ScannedClass(jarName, thisClassName, Location.Method, METHOD_HAVE_SERVLET_BODY));
-                case TypeCheckInstruction typeCheckInstruction when typeCheckInstruction.type().asInternalName().contains(TARGET_PACKAGE) ->
+                case TypeCheckInstruction typeCheckInstruction when shouldRecord(typeCheckInstruction.type().asInternalName()) ->
                         Optional.of(new ScannedClass(jarName, thisClassName, Location.Method, METHOD_HAVE_SERVLET_BODY));
                 default -> Optional.<ScannedClass>empty();
             };
@@ -254,15 +257,15 @@ public class ServletScanner {
 
     private static boolean checkInvokeInstruction(InvokeInstruction instruction) {
         ClassEntry owner = instruction.owner();
-        if (owner.asInternalName().contains(TARGET_PACKAGE)) {
+        if (shouldRecord(owner.asInternalName())) {
             return true;
         }
-        return instruction.typeSymbol().descriptorString().contains(TARGET_PACKAGE);
+        return shouldRecord(instruction.typeSymbol().descriptorString());
     }
 
     private static boolean checkInvokeDynamicInstruction(InvokeDynamicInstruction invokeDynamicInstruction) {
         String descriptorString = invokeDynamicInstruction.bootstrapMethod().invocationType().descriptorString();
-        if (descriptorString.contains(TARGET_PACKAGE)) {
+        if (shouldRecord(descriptorString)) {
             return true;
         }
 
@@ -276,16 +279,16 @@ public class ServletScanner {
 
     private static boolean checkConstantDesc(ConstantDesc constantDesc) {
         return switch (constantDesc) {
-            case ClassDesc classDesc -> classDesc.descriptorString().contains(TARGET_PACKAGE);
+            case ClassDesc classDesc -> shouldRecord(classDesc.descriptorString());
             case MethodHandleDesc methodHandleDesc ->
-                    methodHandleDesc.invocationType().descriptorString().contains(TARGET_PACKAGE);
-            case MethodTypeDesc methodTypeDesc -> methodTypeDesc.descriptorString().contains(TARGET_PACKAGE);
-            case String constant -> constant.contains(TARGET_NAME);
+                    shouldRecord(methodHandleDesc.invocationType().descriptorString());
+            case MethodTypeDesc methodTypeDesc -> shouldRecord(methodTypeDesc.descriptorString());
+            case String constant -> shouldRecord(constant);
             case DynamicConstantDesc dynamicConstantDesc -> {
-                if (dynamicConstantDesc.constantType().descriptorString().contains(TARGET_PACKAGE)) {
+                if (shouldRecord(dynamicConstantDesc.constantType().descriptorString())) {
                     yield true;
                 }
-                if (dynamicConstantDesc.bootstrapMethod().invocationType().descriptorString().contains(TARGET_PACKAGE)) {
+                if (shouldRecord(dynamicConstantDesc.bootstrapMethod().invocationType().descriptorString())) {
                     yield true;
                 }
                 for (ConstantDesc bootstrapArg : dynamicConstantDesc.bootstrapArgs()) {
@@ -302,10 +305,10 @@ public class ServletScanner {
     private static boolean checkConstantInstruction(LoadableConstantEntry entry) {
         return switch (entry) {
             //就是xxx.class
-            case ClassEntry classEntry -> classEntry.asInternalName().contains(TARGET_PACKAGE);
+            case ClassEntry classEntry -> shouldRecord(classEntry.asInternalName());
             // 就是字符串
             case ConstantValueEntry constantValueEntry when constantValueEntry instanceof StringEntry stringEntry ->
-                    stringEntry.stringValue().contains(TARGET_NAME);
+                    shouldRecord(stringEntry.stringValue());
             //一般来说没这种东西哈。。。javac不会生成这个字节码 就是condy
             case ConstantDynamicEntry constantDynamicEntry -> checkConstantDynamicEntry(constantDynamicEntry);
             // 一般来说没这种东西哈。。。javac不会生成这个字节码
@@ -334,15 +337,15 @@ public class ServletScanner {
     private static boolean checkMethodHandleEntry(MethodHandleEntry methodHandleEntry) {
         DirectMethodHandleDesc methodHandleEntrySymbol = methodHandleEntry.asSymbol();
         String ownerBinaryName = methodHandleEntrySymbol.owner().descriptorString();
-        if (ownerBinaryName.contains(TARGET_PACKAGE)) {
+        if (shouldRecord(ownerBinaryName)) {
             return true;
         }
         MethodTypeDesc methodTypeDesc = methodHandleEntrySymbol.invocationType();
-        return methodTypeDesc.descriptorString().contains(TARGET_PACKAGE);
+        return shouldRecord(methodTypeDesc.descriptorString());
     }
 
     private static boolean checkMethodTypeEntry(MethodTypeEntry methodTypeEntry) {
-        return methodTypeEntry.asSymbol().descriptorString().contains(TARGET_PACKAGE);
+        return shouldRecord(methodTypeEntry.asSymbol().descriptorString());
     }
 
 
@@ -358,7 +361,7 @@ public class ServletScanner {
                         return runtimeVisibleTypeAnnotationsAttribute.annotations().stream().map(TypeAnnotation::annotation);
                     }
                 })
-                .filter(a -> a.className().stringValue().contains(TARGET_PACKAGE))
+                .filter(a -> shouldRecord(a.className().stringValue()))
                 .map(a -> new ScannedClass(jarName, thisClassName, location, detail));
     }
 
