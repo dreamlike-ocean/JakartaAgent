@@ -15,61 +15,75 @@
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
         <main.class>io.github.dreamlike.scanner.ServletScanner</main.class>
         <java.version>25</java.version>
-        <native.optimization>-Ob</native.optimization>
     </properties>
     <profiles>
         <profile>
-            <id>native-base</id>
-            <activation>
-                <file>
-                    <exists>${java.home}/bin/native-image</exists>
-                </file>
-            </activation>
+            <id>native-release</id>
+            <properties>
+                <native.optimization>-O3</native.optimization>
+            </properties>
             <build>
                 <plugins>
                     <plugin>
                         <groupId>org.graalvm.buildtools</groupId>
                         <artifactId>native-maven-plugin</artifactId>
-                        <version>0.10.6</version>
-                        <extensions>false</extensions>
-                        <configuration>
-                            <metadataRepository>
-                                <enabled>false</enabled>
-                            </metadataRepository>
-                            <imageName>${project.artifactId}-native</imageName>
-                            <mainClass>${main.class}</mainClass>
-                            <buildArgs>
-                                <arg>--allow-incomplete-classpath</arg>
-                                <arg>--enable-native-access=ALL-UNNAMED</arg>
-                                <arg>--no-fallback</arg>
-                                <!-- Only difference -->
-                                <arg>${native.optimization}</arg>
-                            </buildArgs>
-                        </configuration>
-                        <executions>
-                            <execution>
-                                <id>native-image</id>
-                                <phase>package</phase>
-                                <goals>
-                                    <goal>compile-no-fork</goal>
-                                </goals>
-                            </execution>
-                        </executions>
                     </plugin>
                 </plugins>
             </build>
         </profile>
 
         <profile>
-            <id>native-release</id>
+            <id>native-debug</id>
             <properties>
-                <native.optimization>-O3</native.optimization>
+                <native.optimization>-Ob</native.optimization>
             </properties>
+            <build>
+                <plugins>
+                    <plugin>
+                        <groupId>org.graalvm.buildtools</groupId>
+                        <artifactId>native-maven-plugin</artifactId>
+                    </plugin>
+                </plugins>
+            </build>
         </profile>
+
 
     </profiles>
 
     <build>
+        <pluginManagement>
+            <plugins>
+                <plugin>
+                    <groupId>org.graalvm.buildtools</groupId>
+                    <artifactId>native-maven-plugin</artifactId>
+                    <version>0.10.6</version>
+                    <extensions>false</extensions>
+                    <configuration>
+                        <metadataRepository>
+                            <enabled>false</enabled>
+                        </metadataRepository>
+                        <imageName>${project.artifactId}-native</imageName>
+                        <mainClass>${main.class}</mainClass>
+                        <buildArgs>
+                            <arg>--allow-incomplete-classpath</arg>
+                            <arg>--enable-native-access=ALL-UNNAMED</arg>
+                            <arg>--no-fallback</arg>
+                            <!-- Only difference -->
+                            <arg>${native.optimization}</arg>
+                        </buildArgs>
+                    </configuration>
+                    <executions>
+                        <execution>
+                            <id>native-image</id>
+                            <phase>package</phase>
+                            <goals>
+                                <goal>compile-no-fork</goal>
+                            </goals>
+                        </execution>
+                    </executions>
+                </plugin>
+            </plugins>
+        </pluginManagement>
         <plugins>
             <plugin>
                 <groupId>org.apache.maven.plugins</groupId>
