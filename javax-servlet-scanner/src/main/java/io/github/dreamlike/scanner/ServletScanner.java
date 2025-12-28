@@ -1,6 +1,5 @@
 package io.github.dreamlike.scanner;
 
-import java.awt.*;
 import java.io.ByteArrayInputStream;
 import java.io.File;
 import java.io.IOException;
@@ -17,7 +16,7 @@ import java.util.stream.Stream;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipInputStream;
 
-public class ServletScanner {
+class ServletScanner {
     private static final String TARGET_PACKAGE = "javax/servlet";
     private static final String TARGET_NAME = "javax.servlet";
     private static final String EXTEND_SERVLET_CLASS = "Current Class extends javax.servlet class";
@@ -37,16 +36,22 @@ public class ServletScanner {
     private static final String FIELD_HAVE_SERVLET_ANNOTATION = "Current Field has javax.servlet annotation";
     private static final String FIELD_HAVE_SERVLET_TYPE = "Current Field has javax.servlet type";
 
+    private final String targetPath;
+    private final DetailType detailType;
+
     private static boolean shouldRecord(String name) {
         return name != null && (name.contains(TARGET_PACKAGE) || name.contains(TARGET_NAME));
     }
 
-    public static void main(String[] args) throws IOException {
+    public ServletScanner(String[] args) {
         if (args.length < 1) {
-            System.out.println("Usage: JavaxScanner <jar path> [detail type (Jar/Class/Detail)]");
+            throw new IllegalArgumentException("Usage: JavaxScanner <jar path> [detail type (Jar/Class/Detail)]");
         }
-        String targetPath = args[0];
-        DetailType detailType = args.length > 1 ? DetailType.valueOf(args[1]) : DetailType.ALL;
+        targetPath = args[0];
+        detailType = args.length > 1 ? DetailType.valueOf(args[1]) : DetailType.ALL;
+    }
+
+    void scan() throws IOException {
         ArrayDeque<JarChunk> stack = new ArrayDeque<>();
         try {
             stack.push(new JarChunk(Files.readAllBytes(new File(targetPath).toPath()), targetPath));

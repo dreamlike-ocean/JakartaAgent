@@ -13,7 +13,7 @@
 
     <properties>
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
-        <main.class>io.github.dreamlike.scanner.ServletScanner</main.class>
+        <main.class>io.github.dreamlike.scanner.Main</main.class>
         <java.version>25</java.version>
     </properties>
     <profiles>
