@@ -4,6 +4,7 @@ import java.awt.*;
 import java.io.ByteArrayInputStream;
 import java.io.File;
 import java.io.IOException;
+import java.io.InputStream;
 import java.lang.classfile.*;
 import java.lang.classfile.attribute.*;
 import java.lang.classfile.constantpool.*;
@@ -41,6 +42,37 @@ public class ServletScanner {
         return name != null && (name.contains(TARGET_PACKAGE) || name.contains(TARGET_NAME));
     }
 
+    /**
+     * Find ZIP data start position, compatible with executable JAR
+     * Creates an InputStream that skips shebang prefix to find real ZIP magic number
+     */
+    private static InputStream createZipInputStream(byte[] data) {
+        if (data == null) {
+            return new ByteArrayInputStream(new byte[0]);
+        }
+        if (data.length < 4) {
+            return new ByteArrayInputStream(data);
+        }
+        
+        // ZIP magic number: PK (0x50 0x4B) followed by 0x03 0x04 or 0x05 0x06 or 0x07 0x08
+        for (int i = 0; i <= data.length - 4; i++) {
+            if (data[i] == 0x50 && data[i + 1] == 0x4B) { // "PK"
+                int third = data[i + 2] & 0xFF;
+                int fourth = data[i + 3] & 0xFF;
+                // Check if it's a valid ZIP signature
+                if ((third == 0x03 && fourth == 0x04) || // Local file header
+                    (third == 0x05 && fourth == 0x06) || // Empty archive
+                    (third == 0x07 && fourth == 0x08)) { // Sparse archive
+                    // Found ZIP start position, create InputStream from this position
+                    return new ByteArrayInputStream(data, i, data.length - i);
+                }
+            }
+        }
+        
+        // No ZIP magic found, return original data (might be corrupted file)
+        return new ByteArrayInputStream(data);
+    }
+
     public static void main(String[] args) throws IOException {
         if (args.length < 1) {
             System.out.println("Usage: JavaxScanner <jar path> [detail type (Jar/Class/Detail)]");
@@ -57,7 +89,8 @@ public class ServletScanner {
         ArrayList<Stream<ScannedClass>> scannedClasses = new ArrayList<>();
         while (!stack.isEmpty()) {
             JarChunk currentJar = stack.pop();
-            try (ZipInputStream zipInputStream = new ZipInputStream(new ByteArrayInputStream(currentJar.classBytes()))) {
+            try (InputStream zipDataStream = createZipInputStream(currentJar.classBytes());
+                 ZipInputStream zipInputStream = new ZipInputStream(zipDataStream)) {
                 ZipEntry entry;
                 while ((entry = zipInputStream.getNextEntry()) != null) {
                     if (entry.isDirectory()) {
